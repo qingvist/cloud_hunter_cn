@@ -1,0 +1,17 @@
+# 忽略密码文件（绝对不能上传！）
+.streamlit/secrets.toml
+
+# 忽略虚拟环境（太大，不需要上传）
+venv/
+
+# 忽略编译缓存
+__pycache__/
+
+# 忽略本地数据库（如果你不想把你的私人藏品上传给别人看）
+# 如果你希望别人下载下来是一个空的全新App，就忽略它
+clouds.db
+cloud_collection.db
+
+# 忽略以前的旧文件
+env_template.env
+check_models.py
