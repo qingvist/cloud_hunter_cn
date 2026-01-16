@@ -4,25 +4,21 @@ import datetime
 import hashlib
 import base64
 import time
+import json
 import streamlit as st
-from google import genai
-from google.genai import types
+from zhipuai import ZhipuAI  # 🔴 改动1：引入智谱库
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import io
 import platform
 
 # ==========================================
-# 🤖 核心配置
+# 🤖 核心配置：使用智谱视觉模型
 # ==========================================
-AVAILABLE_MODELS = [
-    "gemini-2.5-flash-lite", 
-    "gemini-2.5-flash",       
-    "gemini-1.5-flash",       
-    "gemini-2.0-flash-exp"    
-]
+# 智谱目前性价比最高且免费额度可用的是 glm-4v-flash
+MODEL_NAME = "glm-4v-flash"
 
 # ==========================================
-# 📖 1. 字典库
+# 📖 1. 字典库 (保持不变)
 # ==========================================
 CLOUD_TRANSLATIONS = {
     "积云": "Cumulus", "淡积云": "Cumulus humilis", "碎积云": "Cumulus fractus", "浓积云": "Cumulus congestus",
@@ -80,147 +76,31 @@ def calculate_tier_from_score(score):
     return "UR"
 
 # ==========================================
-# 🎨 2. UI 样式配置
+# 🎨 2. UI 样式配置 (保持完美 V5.7)
 # ==========================================
-st.set_page_config(page_title="Cloud Hunter Pro", page_icon="☁️", layout="wide")
+st.set_page_config(page_title="云彩收集者手册 (CN)", page_icon="☁️", layout="wide")
 
 def inject_custom_css():
     st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap');
-        
-        .stApp {
-            background-color: #fdfbf7;
-            background-image: radial-gradient(#e0e0e0 1px, transparent 1px);
-            background-size: 20px 20px;
-            font-family: "Lora", "KaiTi", "STKaiti", "SimSun", serif;
-            color: #2c3e50;
-        }
-        
-        /* 隐藏 Streamlit 默认的顶部红线装饰 */
-        header[data-testid="stHeader"] {
-            background: transparent;
-        }
-        
-        .apple-card {
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-            border: 1px solid rgba(0,0,0,0.05);
-            margin-bottom: 20px;
-            min-height: 520px; 
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .mini-dashboard {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 12px;
-            padding: 15px 25px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.04);
-            border: 1px solid rgba(0,0,0,0.05);
-            height: 98px; 
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .preview-container {
-            width: 100%;
-            height: 350px;
-            background-color: #fff;
-            border: 1px solid #eee;
-            padding: 10px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        
-        .preview-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-        
-        /* === 通用按钮样式 === */
-        .stButton>button {
-            border-radius: 8px;
-            height: 3.5em;
-            font-family: "KaiTi", "STKaiti", serif;
-            font-weight: 600;
-            border: none;
-            background: #2c3e50;
-            color: #fff;
-            transition: all 0.3s ease;
-            width: 100%;
-        }
-        .stButton>button:hover {
-            background: #34495e;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(44, 62, 80, 0.3);
-        }
-        
-        /* === 侧边栏工具按钮专用样式 (强制变灰、变小) === */
-        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] button {
-            background-color: #f0f2f5 !important;
-            color: #7f8c8d !important;
-            border: 1px solid #dcdde1 !important;
-            height: 2.8em !important;
-            font-size: 0.85em !important;
-            box-shadow: none !important;
-            border-radius: 6px !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] button:hover {
-            background-color: #e2e6ea !important;
-            color: #2c3e50 !important;
-            border-color: #bdc3c7 !important;
-        }
-
-        [data-testid="stSidebar"] {
-            background-color: #faf9f6;
-            border-right: 1px solid #e0e0e0;
-        }
-        
-        h1, h2, h3, h4 {
-            font-family: "Lora", "KaiTi", "STKaiti", serif;
-            color: #2c3e50;
-            font-weight: bold;
-        }
-        
-        .tooltip-target {
-            cursor: help;
-            border-bottom: 1px dashed #bdc3c7;
-        }
-
-        /* === ☁️ 像素云动画 (使用 SVG Data URI 修复破图问题) === */
-        @keyframes float {
-            0% { transform: translateY(0px); }
-            50% { transform: translateY(-8px); }
-            100% { transform: translateY(0px); }
-        }
-        
-        .pixel-cloud-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            margin-bottom: 5px;
-        }
-        
-        .pixel-cloud {
-            width: 45px;
-            opacity: 0.6;
-            animation: float 4s ease-in-out infinite;
-        }
-        
-        .pixel-cloud.right {
-            animation-delay: 2s; /* 错开动画时间 */
-        }
+        .stApp { background-color: #fdfbf7; background-image: radial-gradient(#e0e0e0 1px, transparent 1px); background-size: 20px 20px; font-family: "Lora", "KaiTi", "STKaiti", "SimSun", serif; color: #2c3e50; }
+        header[data-testid="stHeader"] { background: transparent; }
+        .apple-card { background: rgba(255, 255, 255, 0.9); border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.05); margin-bottom: 20px; min-height: 520px; display: flex; flex-direction: column; }
+        .mini-dashboard { background: rgba(255, 255, 255, 0.95); border-radius: 12px; padding: 15px 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.05); height: 98px; display: flex; align-items: center; justify-content: space-between; }
+        .preview-container { width: 100%; height: 350px; background-color: #fff; border: 1px solid #eee; padding: 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .preview-container img { width: 100%; height: 100%; object-fit: contain; }
+        .stButton>button { border-radius: 8px; height: 3.5em; font-family: "KaiTi", "STKaiti", serif; font-weight: 600; border: none; background: #2c3e50; color: #fff; transition: all 0.3s ease; width: 100%; }
+        .stButton>button:hover { background: #34495e; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(44, 62, 80, 0.3); }
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] button { background-color: #f0f2f5 !important; color: #7f8c8d !important; border: 1px solid #dcdde1 !important; height: 2.8em !important; font-size: 0.85em !important; box-shadow: none !important; border-radius: 6px !important; }
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] button:hover { background-color: #e2e6ea !important; color: #2c3e50 !important; border-color: #bdc3c7 !important; }
+        [data-testid="stSidebar"] { background-color: #faf9f6; border-right: 1px solid #e0e0e0; }
+        h1, h2, h3, h4 { font-family: "Lora", "KaiTi", "STKaiti", serif; color: #2c3e50; font-weight: bold; }
+        .tooltip-target { cursor: help; border-bottom: 1px dashed #bdc3c7; }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-8px); } 100% { transform: translateY(0px); } }
+        .pixel-cloud-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 5px; }
+        .pixel-cloud { width: 45px; opacity: 0.6; animation: float 4s ease-in-out infinite; }
+        .pixel-cloud.right { animation-delay: 2s; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -230,8 +110,9 @@ inject_custom_css()
 # 🔧 3. 后端逻辑
 # ==========================================
 
+# 🔴 改动2：国内无需代理，注释掉
 # os.environ["HTTP_PROXY"] = "http://127.0.0.1:10809"
-#os.environ["HTTPS_PROXY"] = "http://127.0.0.1:10809"
+# os.environ["HTTPS_PROXY"] = "http://127.0.0.1:10809"
 
 def init_db():
     conn = sqlite3.connect('clouds.db')
@@ -425,12 +306,11 @@ def create_share_card(image_bytes, cloud_name, tier, score):
     canvas.save(output_buffer, format="PNG")
     return output_buffer.getvalue()
 
-init_db()
-
+# 🔴 改动3：初始化智谱客户端 (从 secrets 获取 Key)
 try:
-    api_key = st.secrets["GEMINI_API_KEY"]
+    client = ZhipuAI(api_key=st.secrets["ZHIPU_API_KEY"])
 except:
-    st.error("请配置 GEMINI_API_KEY")
+    st.error("请配置 ZHIPU_API_KEY")
     st.stop()
 
 # ==========================================
@@ -439,7 +319,6 @@ except:
 st.sidebar.markdown("## ☁️ 档案中心")
 sidebar_placeholder = st.sidebar.empty()
 
-# ✨✨✨ 工具栏重构：强制小按钮 & 并排 ✨✨✨
 st.sidebar.markdown("---")
 st.sidebar.caption("🔧 数据管理")
 col_tool1, col_tool2 = st.sidebar.columns(2)
@@ -514,13 +393,11 @@ def get_user_rank_info(current_score):
         if current_score < target_score:
             gap = target_score - current_score
             section_progress = (current_score - (max_score * prev_pct)) / (target_score - (max_score * prev_pct))
-            
             idx = RANK_SYSTEM.index((pct, roman, title, color))
             if idx > 0:
                 curr_roman, curr_title, curr_color = RANK_SYSTEM[idx-1][1], RANK_SYSTEM[idx-1][2], RANK_SYSTEM[idx-1][3]
             else:
                 curr_roman, curr_title, curr_color = "I", "抬头族", "#95a5a6"
-            
             tooltip = f"下一级：Lv.{roman} {title} (还需 {gap} 分)"
             return curr_roman, curr_title, curr_color, section_progress, tooltip
         prev_pct = pct
@@ -598,7 +475,7 @@ def render_sidebar():
 render_sidebar()
 
 # ==========================================
-# 🖥️ 6. 主界面 (V5.7: 修复版像素云)
+# 🖥️ 6. 主界面
 # ==========================================
 st.markdown("""
 <div class="pixel-cloud-container">
@@ -677,77 +554,69 @@ with tab1:
     if 'should_process' in locals() and should_process and uploaded_file:
         with main_right:
              status_container = st.empty()
-             status_container.info("⏳ 卫星正在解析云层结构...")
+             status_container.info("⏳ 卫星正在解析云层结构 (GLM-4V)...")
         
         try:
-            # === 🛡️ 第一道防线：检查文件大小 ===
             if len(image_bytes) < 100:
                 status_container.empty()
-                st.error("🚫 上传失败：图片数据为空 (0KB)。请尝试重新上传，或换一张照片。")
+                st.error("🚫 上传失败：图片数据为空 (0KB)。")
                 st.stop()
 
-            # === 🛡️ 第二道防线：尝试智能解码 ===
             try:
-                # 尝试直接打开
                 image_obj = Image.open(io.BytesIO(image_bytes))
-                
-                # 针对“披着JPG皮的WebP/HEIC”进行强制转换
                 if image_obj.format not in ["JPEG", "PNG", "WEBP"]:
                     image_obj = image_obj.convert("RGB")
-                    
             except Exception:
-                # 如果标准库打不开，提示用户可能是 HEIC 或特殊格式
                 status_container.empty()
-                st.error("🚫 无法读取此图片格式。")
-                st.info("💡 建议：\n1. 请尝试 **“截图”** 这张照片，然后上传截图（截图兼容性 100%）。\n2. 或在相册里编辑一下保存后再上传。")
+                st.error("🚫 无法读取此图片格式。请尝试截图后上传。")
                 st.stop()
-            client = genai.Client(api_key=api_key)
-            
-            prompt = """
-            任务：识别图片中的云彩。
-            第一步：判断这张图片是否包含云彩或天空现象。
-            - 如果是猫、狗、室内、黑屏、文字截图等非天空图片，返回 {"is_cloud": false}
-            - 如果包含云，返回 {"is_cloud": true, ...}
-            
-            第二步：如果是云，请进行分类。
-            返回 JSON 格式：
-            {
-                "is_cloud": true/false,
-                "cloud_name": "标准学术名称(中文，如：积云、高积云、波状高积云)", 
-                "score_suggestion": 估算分数(10-100),
-                "science_fact": "科普(30字内)",
-                "weather_tip": "预告(20字内)"
-            }
-            """
-            
-            response = None
-            success = False
-            
-            for model_name in AVAILABLE_MODELS:
-                if success: break
-                for attempt in range(2): 
-                    try:
-                        if attempt > 0 or model_name != AVAILABLE_MODELS[0]:
-                            status_container.warning(f"📡 信号微弱，切换频率至 {model_name}...")
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=[prompt, image_obj], 
-                            config=types.GenerateContentConfig(response_mime_type="application/json")
-                        )
-                        success = True
-                        break
-                    except Exception as e:
-                        err_str = str(e)
-                        if "429" in err_str or "503" in err_str:
-                            time.sleep(2)
-                            continue
-                        else: break 
 
-            if not success or not response:
-                raise Exception("卫星连接暂时中断，请稍后再试。")
-
-            import json
-            result = json.loads(response.text)
+            # 🔴 改动4：构造智谱专用 Prompt
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            
+            response = client.chat.completions.create(
+                model=MODEL_NAME, 
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": base64_image
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": """
+                                任务：识别图片中的云彩。
+                                第一步：判断这张图片是否包含云彩或天空现象。
+                                - 如果是猫、狗、室内、黑屏、文字截图等非天空图片，返回 {"is_cloud": false}
+                                - 如果包含云，返回 {"is_cloud": true, ...}
+                                
+                                第二步：如果是云，请进行分类。
+                                请务必只返回纯净的 JSON 字符串，不要包含 ```json 或其他标记。
+                                格式如下：
+                                {
+                                    "is_cloud": true/false,
+                                    "cloud_name": "标准学术名称(中文，如：积云、高积云)", 
+                                    "score_suggestion": 估算分数(10-100),
+                                    "science_fact": "科普(30字内)",
+                                    "weather_tip": "预告(20字内)"
+                                }
+                                """
+                            }
+                        ]
+                    }
+                ]
+            )
+            
+            # 🔴 改动5：清洗和解析智谱的返回结果
+            raw_content = response.choices[0].message.content
+            # 去除可能存在的 markdown 代码块标记
+            clean_json = raw_content.replace("```json", "").replace("```", "").strip()
+            
+            result = json.loads(clean_json)
             
             if not result.get("is_cloud", False):
                 status_container.empty()
@@ -768,8 +637,7 @@ with tab1:
                 
         except Exception as e:
             status_container.empty()
-            if "429" in str(e): st.error("🔒 观测次数过多，请休息片刻。")
-            else: st.error(f"中断: {e}")
+            st.error(f"分析中断: {e}")
 
     with main_right:
         if existing_record:
